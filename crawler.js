@@ -15,11 +15,11 @@ class WebCrawler {
     
     this.crawler = new Crawler({
       maxConnections: 10,
-      callback: (error, res, done) => {
+      callback: async (error, res, done) => {
         if (error) {
           console.error('Crawler error:', error);
         } else {
-          this.processPage(res);
+          await this.processPage(res);
         }
         done();
       }
@@ -46,18 +46,12 @@ class WebCrawler {
     });
   }
 
-  async crawlUrl(url) {
+  crawlUrl(url) {
     if (this.visitedUrls.has(url)) {
       return;
     }
 
     if (this.maxPages && this.pageCount >= this.maxPages) {
-      return;
-    }
-
-    const exists = await this.db.pageExists(this.dataset, url);
-    if (exists) {
-      this.visitedUrls.add(url);
       return;
     }
 
@@ -80,13 +74,14 @@ class WebCrawler {
 
     const $ = res.$;
     if ($) {
-      const links = [];
+      let foundLinks = 0;
+      let queuedLinks = 0;
       $('a').each((i, elem) => {
         const href = $(elem).attr('href');
         if (href) {
           try {
             const absoluteUrl = new URL(href, currentUrl).href;
-            links.push(absoluteUrl);
+            foundLinks++;
             
             this.linkBuffer.push({
               from: currentUrl,
@@ -95,11 +90,16 @@ class WebCrawler {
 
             if (!this.visitedUrls.has(absoluteUrl)) {
               this.crawlUrl(absoluteUrl);
+              queuedLinks++;
             }
           } catch (e) {
+            console.error(`Error parsing URL: ${href}`, e.message);
           }
         }
       });
+      console.log(`  Found ${foundLinks} links, queued ${queuedLinks} new URLs`);
+    } else {
+      console.log('  No jQuery object available');
     }
   }
 

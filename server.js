@@ -5,28 +5,76 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const db = new Database();
 
+// Log all incoming requests
+app.use((req, res, next) => {
+  console.log('\n=== INCOMING REQUEST ===');
+  console.log(`Method: ${req.method}`);
+  console.log(`URL: ${req.url}`);
+  console.log(`Path: ${req.path}`);
+  console.log(`Query params:`, req.query);
+  console.log(`Params:`, req.params);
+  console.log(`Headers:`, req.headers);
+  console.log('========================\n');
+  next();
+});
+
 app.use(express.json());
 
 app.get('/:datasetName/popular', async (req, res) => {
   try {
     const { datasetName } = req.params;
+    console.log(`Request for popular pages in dataset: ${datasetName}`);
     
     const popularPages = await db.getPopularPages(datasetName, 10);
+    console.log(`Found ${popularPages.length} popular pages`);
     
+    if (popularPages.length === 0) {
+      console.warn(`No pages found for dataset: ${datasetName}`);
+    }
+    
+    // Use external IP instead of req.get('host') to ensure URLs work externally
+    const baseUrl = 'http://134.117.133.107:3000';
     const result = popularPages.map(page => ({
-      url: `/${datasetName}/page?url=${encodeURIComponent(page.url)}`,
+      url: `${baseUrl}/${datasetName}/pages/${page.id}`,
       origUrl: page.url
     }));
     
+    console.log(`Returning ${result.length} results`);
     res.json({ result });
   } catch (error) {
     console.error('Error fetching popular pages:', error);
+    console.error('Stack trace:', error.stack);
+    res.status(500).json({ error: 'Internal server error', message: error.message });
+  }
+});
+
+app.get('/:datasetName/pages/:pageId', async (req, res) => {
+  try {
+    console.log(`Request for page by ID - dataset: ${req.params.datasetName}, pageId: ${req.params.pageId}`);
+    const { datasetName, pageId } = req.params;
+    
+    const page = await db.getPageById(datasetName, pageId);
+    
+    if (!page) {
+      return res.status(404).json({ error: 'Page not found' });
+    }
+    
+    const incomingLinks = await db.getIncomingLinks(datasetName, page.url);
+    
+    res.json({
+      webUrl: page.url,
+      incomingLinks: incomingLinks
+    });
+  } catch (error) {
+    console.error('Error fetching page:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
 });
 
 app.get('/:datasetName/page', async (req, res) => {
   try {
+    console.log(`Request for page - dataset: ${req.params.datasetName}, url: ${req.query.url}`);
+    console.log(`Full request URL: ${req.url}`);
     const { datasetName } = req.params;
     const { url } = req.query;
     
@@ -43,7 +91,7 @@ app.get('/:datasetName/page', async (req, res) => {
     const incomingLinks = await db.getIncomingLinks(datasetName, url);
     
     res.json({
-      WebUrl: url,
+      webURL: url,
       incomingLinks: incomingLinks
     });
   } catch (error) {

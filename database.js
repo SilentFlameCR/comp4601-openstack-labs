@@ -15,6 +15,9 @@ class Database {
 
   initTables() {
     this.db.serialize(() => {
+      this.db.run('PRAGMA journal_mode = WAL');
+      this.db.run('PRAGMA busy_timeout = 5000');
+      
       this.db.run(`
         CREATE TABLE IF NOT EXISTS pages (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -91,7 +94,7 @@ class Database {
   getPopularPages(dataset, limit = 10) {
     return new Promise((resolve, reject) => {
       const query = `
-        SELECT p.url, COUNT(l.id) as incoming_count
+        SELECT p.id, p.url, p.content, COUNT(l.id) as incoming_count
         FROM pages p
         LEFT JOIN links l ON p.dataset = l.dataset AND p.url = l.to_url
         WHERE p.dataset = ?
@@ -115,6 +118,19 @@ class Database {
         (err, rows) => {
           if (err) reject(err);
           else resolve(rows.map(row => row.from_url));
+        }
+      );
+    });
+  }
+
+  getPageById(dataset, pageId) {
+    return new Promise((resolve, reject) => {
+      this.db.get(
+        'SELECT * FROM pages WHERE dataset = ? AND id = ?',
+        [dataset, pageId],
+        (err, row) => {
+          if (err) reject(err);
+          else resolve(row);
         }
       );
     });
