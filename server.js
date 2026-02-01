@@ -1,24 +1,99 @@
 const express = require('express');
 const Database = require('./database');
+const TFIDFIndex = require('./tfidf');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const db = new Database();
 
+// TF-IDF indexes for each dataset
+const indexes = new Map();
+
+// Initialize TF-IDF indexes on startup
+async function initializeIndexes() {
+  const datasets = ['tinyfruits', 'fruits100', 'fruitsA', 'fruitsB'];
+  
+  for (const dataset of datasets) {
+    try {
+      const pages = await db.getAllPages(dataset);
+      if (pages.length > 0) {
+        const index = new TFIDFIndex();
+        index.buildIndex(pages);
+        indexes.set(dataset, index);
+        console.log(`Initialized TF-IDF index for ${dataset} with ${pages.length} documents`);
+      }
+    } catch (error) {
+      console.error(`Error initializing index for ${dataset}:`, error);
+    }
+  }
+}
+
+// Initialize indexes when server starts
+initializeIndexes().catch(console.error);
+
 // Log all incoming requests
 app.use((req, res, next) => {
-  console.log('\n=== INCOMING REQUEST ===');
-  console.log(`Method: ${req.method}`);
-  console.log(`URL: ${req.url}`);
-  console.log(`Path: ${req.path}`);
-  console.log(`Query params:`, req.query);
-  console.log(`Params:`, req.params);
-  console.log(`Headers:`, req.headers);
-  console.log('========================\n');
+  // console.log('\n=== INCOMING REQUEST ===');
+  // console.log(`Method: ${req.method}`);
+  // console.log(`URL: ${req.url}`);
+  // console.log(`Path: ${req.path}`);
+  // console.log(`Query params:`, req.query);
+  // console.log(`Params:`, req.params);
+  // console.log(`Headers:`, req.headers);
+  // console.log('========================\n');
   next();
 });
 
 app.use(express.json());
+
+// Info endpoint - must come before /:datasetName to avoid route conflict
+app.get('/info', (req, res) => {
+  res.json({
+    name: 'MadiTook5898'
+  });
+});
+
+// Search endpoint
+app.get('/:datasetName', async (req, res) => {
+  try {
+    const { datasetName } = req.params;
+    const query = req.query.q || req.query.phrase;
+
+    if (!query) {
+      return res.status(400).json({ error: 'Query parameter q or phrase is required' });
+    }
+
+    console.log(`Search request for dataset: ${datasetName}, query: ${query}`);
+
+    // Get or create index for this dataset
+    let index = indexes.get(datasetName);
+    if (!index) {
+      console.log(`Index not found for ${datasetName}, building now...`);
+      const pages = await db.getAllPages(datasetName);
+      if (pages.length === 0) {
+        return res.status(404).json({ error: 'Dataset not found or empty' });
+      }
+      index = new TFIDFIndex();
+      index.buildIndex(pages);
+      indexes.set(datasetName, index);
+    }
+
+    // Perform search
+    const results = index.search(query, 10);
+
+    // Format results
+    const formattedResults = results.map(result => ({
+      url: result.url,
+      title: result.title,
+      score: result.score
+    }));
+
+    res.json({ result: formattedResults });
+  } catch (error) {
+    console.error('Error performing search:', error);
+    res.status(500).json({ error: 'Internal server error' });
+  }
+});
 
 app.get('/:datasetName/popular', async (req, res) => {
   try {
@@ -98,12 +173,6 @@ app.get('/:datasetName/page', async (req, res) => {
     console.error('Error fetching page:', error);
     res.status(500).json({ error: 'Internal server error' });
   }
-});
-
-app.get('/info', (req, res) => {
-  res.json({
-    name: 'MadiTook5898'
-  });
 });
 
 app.listen(PORT, () => {

@@ -149,6 +149,19 @@ class Database {
     });
   }
 
+  getAllPages(dataset) {
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        'SELECT id, url, content FROM pages WHERE dataset = ?',
+        [dataset],
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows);
+        }
+      );
+    });
+  }
+
   clearDataset(dataset) {
     return new Promise((resolve, reject) => {
       this.db.serialize(() => {
