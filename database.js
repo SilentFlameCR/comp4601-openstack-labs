@@ -162,6 +162,19 @@ class Database {
     });
   }
 
+  getLinks(dataset) {
+    return new Promise((resolve, reject) => {
+      this.db.all(
+        'SELECT from_url, to_url FROM links WHERE dataset = ?',
+        [dataset],
+        (err, rows) => {
+          if (err) reject(err);
+          else resolve(rows);
+        }
+      );
+    });
+  }
+
   clearDataset(dataset) {
     return new Promise((resolve, reject) => {
       this.db.serialize(() => {

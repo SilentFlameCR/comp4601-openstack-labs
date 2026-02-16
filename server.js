@@ -46,11 +46,162 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 
+// PageRank calculation cache
+const pageRankCache = new Map();
+
+function euclideanDistance(a, b) {
+  let sum = 0;
+  for (let i = 0; i < a.length; i++) {
+    const diff = a[i] - b[i];
+    sum += diff * diff;
+  }
+  return Math.sqrt(sum);
+}
+
+async function computePageRank(datasetName) {
+  const alpha = 0.1;
+  const epsilon = 0.0001;
+
+  // Check cache
+  if (pageRankCache.has(datasetName)) {
+    return pageRankCache.get(datasetName);
+  }
+
+  try {
+    const pages = await db.getAllPages(datasetName);
+    
+    if (pages.length === 0) {
+      return null;
+    }
+
+    const urls = pages.map(p => p.url);
+    const N = urls.length;
+    const urlToIdx = {};
+    urls.forEach((url, idx) => {
+      urlToIdx[url] = idx;
+    });
+
+    // Get all links for the dataset
+    const links = await db.getLinks(datasetName);
+
+    // Build outgoing links adjacency list
+    const outgoing = Array.from({ length: N }, () => []);
+    
+    for (const link of links) {
+      const fromIdx = urlToIdx[link.from_url];
+      const toIdx = urlToIdx[link.to_url];
+      
+      if (fromIdx !== undefined && toIdx !== undefined && fromIdx !== toIdx) {
+        outgoing[fromIdx].push(toIdx);
+      }
+    }
+
+    // Initialize PageRank uniformly
+    let pr = new Array(N).fill(1.0 / N);
+
+    // Iterate until convergence
+    while (true) {
+      const next = new Array(N).fill(alpha / N);
+
+      // Handle dangling nodes
+      let danglingMass = 0;
+      for (let j = 0; j < N; j++) {
+        if (outgoing[j].length === 0) {
+          danglingMass += pr[j];
+        } else {
+          const share = pr[j] / outgoing[j].length;
+          for (const i of outgoing[j]) {
+            next[i] += (1 - alpha) * share;
+          }
+        }
+      }
+
+      // Distribute dangling mass
+      if (danglingMass > 0) {
+        const add = (1 - alpha) * (danglingMass / N);
+        for (let i = 0; i < N; i++) {
+          next[i] += add;
+        }
+      }
+
+      // Check convergence
+      const dist = euclideanDistance(pr, next);
+      pr = next;
+
+      if (dist < epsilon) {
+        break;
+      }
+    }
+
+    // Store results in map
+    const results = new Map();
+    for (let i = 0; i < N; i++) {
+      results.set(urls[i], pr[i]);
+    }
+
+    pageRankCache.set(datasetName, results);
+    return results;
+  } catch (error) {
+    console.error('Error computing PageRank:', error);
+    throw error;
+  }
+}
+
 // Info endpoint - must come before /:datasetName to avoid route conflict
 app.get('/info', (req, res) => {
   res.json({
     name: 'MadiTook5898'
   });
+});
+
+// PageRank endpoint
+app.get('/pageranks', async (req, res) => {
+  try {
+    console.log('PageRank request received:', req.query.url);
+    const url = req.query.url;
+    
+    if (!url || typeof url !== 'string') {
+      console.log('Missing URL parameter');
+      return res.status(400).send('Missing url');
+    }
+
+    // Determine dataset from URL
+    let dataset = null;
+    if (url.includes('/tinyfruits/')) {
+      dataset = 'tinyfruits';
+    } else if (url.includes('/fruits100/')) {
+      dataset = 'fruits100';
+    } else if (url.includes('/fruitsA/') || url.includes('/fruitsB/')) {
+      dataset = 'fruitsA';
+    }
+
+    console.log('Dataset determined:', dataset);
+
+    if (!dataset) {
+      return res.status(404).send('Unknown dataset');
+    }
+
+    console.log('Computing PageRank for dataset:', dataset);
+    const ranks = await computePageRank(dataset);
+    console.log('PageRank computed, results:', ranks ? ranks.size : 'null');
+    
+    if (!ranks) {
+      return res.status(404).send('Dataset not found');
+    }
+
+    const rank = ranks.get(url.trim());
+    console.log('Rank for URL:', rank);
+    
+    if (rank === undefined) {
+      return res.status(404).send('URL not found');
+    }
+
+    res.type('text/plain').send(String(rank));
+  } catch (error) {
+    console.error('Error in /pageranks:', error);
+    console.error('Stack:', error.stack);
+    res.status(500).send('Internal server error');
+  }
 });
 
 // Search endpoint
